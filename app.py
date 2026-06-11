@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import os
 
 # 1. ตั้งค่าหน้าตารูปแบบเว็บ Dashboard
 st.set_page_config(
@@ -11,24 +12,51 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. ฟังก์ชันโหลดข้อมูล (ใส่ Cache เพื่อความรวดเร็วในการโหลดซ้ำ)
+# 2. ฟังก์ชันโหลดและล้างข้อมูล (Data Cleaning & Conversion)
 @st.cache_data
 def load_data():
-    # เลือกใช้ไฟล์ cost_return ซึ่งมีตัวแปรวิเคราะห์ครบถ้วน
-    file_path = "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.csv"
+    # รองรับการหาไฟล์ทั้งแบบชื่อสั้นและชื่อเต็มที่อัปโหลด
+    possible_files = [
+        "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.xlsx - cost_return.csv",
+        "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.csv",
+        "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.xlsx - Use this.csv"
+    ]
+    
+    file_path = None
+    for f in possible_files:
+        if os.path.exists(f):
+            file_path = f
+            break
+            
+    if file_path is None:
+        raise FileNotFoundError("ไม่พบไฟล์ข้อมูลในระบบ")
+
     df = pd.read_csv(file_path)
     
+    # 🌟 [จุดแก้ไขสำคัญ] แปลงคอลัมน์ตัวเลขที่มักติด Format String หรือเครื่องหมายจุลภาค (,)
+    numeric_cols = ['avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price', 'profit_est']
+    for col in numeric_cols:
+        if col in df.columns:
+            # แปลงเป็น String -> ลบเครื่องหมายคอมมา -> ลบช่องว่างหัวท้าย
+            df[col] = df[col].astype(str).str.replace(',', '').str.strip()
+            # บังคับแปลงเป็นตัวเลข (หากแถวไหนเป็นข้อความที่แปลงไม่ได้ จะกลายเป็น NaN อัตโนมัติ ไม่ทำให้แอปพัง)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            
     # แปลงข้อมูลสำหรับแสดงผลให้อ่านง่ายขึ้น
     df['account_type_desc'] = df['account_type'].map({'A': 'บัญชี ก. (ต้นไม้ทั่วไป)', 'B': 'บัญชี ข. (ต้นไม้ล้มลุก)'})
-    # แทนค่าข้อมูลที่ไม่มีภูมิภาคระบุชัดเจนด้วย 'Estimated/Global'
     df['regions'] = df['regions'].fillna('ทั่วประเทศ (Estimated)')
+    
+    # สร้างคอลัมน์ profit_est ให้เผื่อกรณีบางไฟล์ไม่มี
+    if 'profit_est' not in df.columns or df['profit_est'].isnull().all():
+        df['profit_est'] = df['avg_revenue_per_year'].fillna(0) - df['avg_cost_total'].fillna(0)
+        
     return df
 
 try:
     df = load_data()
 except Exception as e:
-    st.error(f"❌ ไม่พบไฟล์ข้อมูลหรือเกิดข้อผิดพลาดในการโหลด: {e}")
-    st.info("💡 กรุณาตรวจสอบว่าชื่อไฟล์ข้อมูลในโฟลเดอร์ตรงกับ 'ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.xlsx - cost_return.csv'")
+    st.error(f"❌ เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
+    st.info("💡 กรุณาตรวจสอบว่ามีไฟล์ข้อมูล .csv วางอยู่ในโฟลเดอร์เดียวกับแอปพลิเคชันเรียบร้อยแล้ว")
     st.stop()
 
 # 3. ส่วนควบคุมด้านข้าง (Sidebar Filters)
@@ -55,7 +83,7 @@ filtered_df = df[
     (df['account_type_desc'].isin(selected_accounts)) & 
     (df['regions'].isin(selected_regions)) &
     (df['is_active'] == 1) # เอาเฉพาะรายการที่ยังใช้งานอยู่
-]
+].copy()
 
 # 4. ส่วนหัวของหน้า Dashboard
 st.title("🌱 แดชบอร์ดวิเคราะห์ต้นทุนและผลตอบแทนพืช (ERC 2568)")
@@ -78,10 +106,11 @@ with col2:
     )
 with col3:
     avg_rev = filtered_df['avg_revenue_per_year'].mean()
+    avg_profit = filtered_df['profit_est'].mean() if 'profit_est' in filtered_df.columns else 0
     st.metric(
         label="รายได้เฉลี่ย/ปี", 
         value=f"{avg_rev:,.2f} บาท" if not pd.isna(avg_rev) else "N/A",
-        delta=f"กำไรเฉลี่ย: {filtered_df['profit_est'].mean():,.2f} บาท" if 'profit_est' in filtered_df.columns else None
+        delta=f"กำไรเฉลี่ย: {avg_profit:,.2f} บาท" if not pd.isna(avg_profit) else None
     )
 with col4:
     avg_wta = filtered_df['avg_wta'].mean()
@@ -106,47 +135,56 @@ with tab1:
             "avg_proposed_price": "ราคาเสนออ้างอิง (บาท)"
         }
         
-        top_10 = filtered_df.nlargest(10, metric_to_plot)
-        fig_bar = px.bar(
-            top_10,
-            x=metric_to_plot,
-            y='plant_name',
-            orientation='h',
-            title=f"🥇 10 อันดับพืชที่มี{metric_labels[metric_to_plot]}สูงสุด",
-            labels={metric_to_plot: metric_labels[metric_to_plot], 'plant_name': 'ชื่อพืช'},
-            color=metric_to_plot,
-            color_continuous_scale='Viridis'
-        )
-        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_bar, use_container_width=True)
+        # ป้องกัน error กรณีไม่มีข้อมูลเหลือจากการกรอง
+        if not filtered_df.empty:
+            top_10 = filtered_df.dropna(subset=[metric_to_plot]).nlargest(10, metric_to_plot)
+            fig_bar = px.bar(
+                top_10,
+                x=metric_to_plot,
+                y='plant_name',
+                orientation='h',
+                title=f"🥇 10 อันดับพืชที่มี{metric_labels[metric_to_plot]}สูงสุด",
+                labels={metric_to_plot: metric_labels[metric_to_plot], 'plant_name': 'ชื่อพืช'},
+                color=metric_to_plot,
+                color_continuous_scale='Viridis'
+            )
+            fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.warning("ไม่มีข้อมูลสำหรับสร้างกราฟแท่ง")
         
     with col_chart2:
-        # สัดส่วนประเภทบัญชีพืชในเซ็ตข้อมูลที่เลือก
-        fig_pie = px.pie(
-            filtered_df, 
-            names='account_type_desc', 
-            title="สัดส่วนพืชตามประเภทบัญชีกลาง",
-            hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        if not filtered_df.empty:
+            fig_pie = px.pie(
+                filtered_df, 
+                names='account_type_desc', 
+                title="สัดส่วนพืชตามประเภทบัญชีกลาง",
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.warning("ไม่มีข้อมูลสำหรับสร้างกราฟวงกลม")
 
 with tab2:
     st.markdown("#### กราฟกระจายตัวเปรียบเทียบต้นทุนรวมและรายได้ต่อปีแยกตามพืช")
     if not filtered_df.empty:
+        # เช็คว่ามีค่า WTA ที่เหมาะสมมาทำเป็นขนาดจุดขนาดวงกลมหรือไม่
+        has_valid_wta = 'avg_wta' in filtered_df.columns and filtered_df['avg_wta'].fillna(0).min() >= 0 and filtered_df['avg_wta'].sum() > 0
+        
         fig_scatter = px.scatter(
             filtered_df,
             x="avg_cost_total",
             y="avg_revenue_per_year",
             color="account_type_desc",
-            size="avg_wta" if filtered_df["avg_wta"].min() >= 0 else None,
+            size="avg_wta" if has_valid_wta else None,
             hover_name="plant_name",
-            hover_data=["regions", "avg_age", "avg_proposed_price"],
+            hover_data=["regions", "avg_age", "avg_proposed_price"] if "avg_age" in filtered_df.columns else ["regions", "avg_proposed_price"],
             labels={
                 "avg_cost_total": "ต้นทุนรวมเฉลี่ย (บาท)",
                 "avg_revenue_per_year": "รายได้รวมเฉลี่ยต่อปี (บาท)"
             },
-            title="Cost vs Revenue Analysis (ขนาดวงกลมแปรผันตามค่า WTA)"
+            title="Cost vs Revenue Analysis" + (" (ขนาดวงกลมแปรผันตามค่า WTA)" if has_valid_wta else "")
         )
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
@@ -162,12 +200,14 @@ if search_query:
 else:
     display_df = filtered_df
 
-# คัดเลือกคอลัมน์ที่เข้าใจง่ายมาแสดงผล
-cols_to_show = ['plant_id', 'plant_name', 'account_type_desc', 'regions', 'avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price', 'avg_age']
+# คัดเลือกคอลัมน์ที่ปลอดภัยมาแสดงผล (ตรวจสอบคอลัมน์ที่มีอยู่จริง)
+available_cols = ['plant_id', 'plant_name', 'account_type_desc', 'regions', 'avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price']
+cols_to_show = [c for c in available_cols if c in display_df.columns]
+
 st.dataframe(display_df[cols_to_show], use_container_width=True)
 
 # ปุ่มกดสำหรับดาวน์โหลดข้อมูลที่ฟิลเตอร์แล้วออกไปเป็น CSV
-csv = display_df.to_csv(index=False).encode('utf-8-sig') # ใช้ utf-8-sig เพื่อให้อ่านภาษาไทยใน Excel ได้
+csv = display_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button(
     label="📥 ดาวน์โหลดข้อมูลชุดนี้เป็นไฟล์ CSV",
     data=csv,
