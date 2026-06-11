@@ -15,38 +15,31 @@ st.set_page_config(
 # 2. ฟังก์ชันโหลดและล้างข้อมูล (Data Cleaning & Conversion)
 @st.cache_data
 def load_data():
-    # รองรับการหาไฟล์ทั้งแบบชื่อสั้นและชื่อเต็มที่อัปโหลด
-    possible_files = [
-        "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.xlsx - cost_return.csv",
-        "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.csv",
-        "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.xlsx - Use this.csv"
-    ]
+    # ล็อคชื่อไฟล์จริงที่คุณใช้ทำงาน
+    file_path = "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.csv"
     
-    file_path = None
-    for f in possible_files:
-        if os.path.exists(f):
-            file_path = f
-            break
-            
-    if file_path is None:
-        raise FileNotFoundError("ไม่พบไฟล์ข้อมูลในระบบ")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"ไม่พบไฟล์ข้อมูล: {file_path} ในระบบ")
 
     df = pd.read_csv(file_path)
     
-    # 🌟 [จุดแก้ไขสำคัญ] แปลงคอลัมน์ตัวเลขที่มักติด Format String หรือเครื่องหมายจุลภาค (,)
+    # แปลงคอลัมน์ตัวเลขที่อาจติด Format String หรือเครื่องหมายจุลภาค (,)
     numeric_cols = ['avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price', 'profit_est']
     for col in numeric_cols:
         if col in df.columns:
-            # แปลงเป็น String -> ลบเครื่องหมายคอมมา -> ลบช่องว่างหัวท้าย
             df[col] = df[col].astype(str).str.replace(',', '').str.strip()
-            # บังคับแปลงเป็นตัวเลข (หากแถวไหนเป็นข้อความที่แปลงไม่ได้ จะกลายเป็น NaN อัตโนมัติ ไม่ทำให้แอปพัง)
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
-    # แปลงข้อมูลสำหรับแสดงผลให้อ่านง่ายขึ้น
+    # แปลงข้อมูลคำอธิบายบัญชีให้อ่านง่ายขึ้น
     df['account_type_desc'] = df['account_type'].map({'A': 'บัญชี ก. (ต้นไม้ทั่วไป)', 'B': 'บัญชี ข. (ต้นไม้ล้มลุก)'})
-    df['regions'] = df['regions'].fillna('ทั่วประเทศ (Estimated)')
     
-    # สร้างคอลัมน์ profit_est ให้เผื่อกรณีบางไฟล์ไม่มี
+    # ทำความสะอาดข้อมูลภูมิภาค (ลบช่องว่างออก)
+    if 'regions' in df.columns:
+        df['regions'] = df['regions'].astype(str).str.strip()
+    else:
+        df['regions'] = 'estimated'
+    
+    # สร้างคอลัมน์กำไรสุทธิประเมิน (Profit) หากในไฟล์ไม่มี
     if 'profit_est' not in df.columns or df['profit_est'].isnull().all():
         df['profit_est'] = df['avg_revenue_per_year'].fillna(0) - df['avg_cost_total'].fillna(0)
         
@@ -56,13 +49,15 @@ try:
     df = load_data()
 except Exception as e:
     st.error(f"❌ เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
-    st.info("💡 กรุณาตรวจสอบว่ามีไฟล์ข้อมูล .csv วางอยู่ในโฟลเดอร์เดียวกับแอปพลิเคชันเรียบร้อยแล้ว")
+    st.info("💡 กรุณาตรวจสอบว่ามีไฟล์ข้อมูล 'ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.csv' วางอยู่ในโฟลเดอร์เดียวกับแอปพลิเคชันเรียบร้อยแล้ว")
     st.stop()
 
 # 3. ส่วนควบคุมด้านข้าง (Sidebar Filters)
 st.sidebar.header("🔍 ตัวกรองข้อมูล (Filters)")
 
-# ฟิลเตอร์ประเภทบัญชี
+# กรองลิสต์เฉพาะภูมิภาคที่มีค่าจริง ไม่นับรวมค่าว่างหรือ estimated มาแสดงในเมนูตัวเลือก
+valid_regions = df[~df['regions'].isin(['nan', 'estimated', 'None']) & df['regions'].notna()]['regions'].unique().tolist()
+
 account_types = df['account_type_desc'].dropna().unique().tolist()
 selected_accounts = st.sidebar.multiselect(
     "เลือกประเภทบัญชีพืช:", 
@@ -70,19 +65,17 @@ selected_accounts = st.sidebar.multiselect(
     default=account_types
 )
 
-# ฟิลเตอร์ภูมิภาค
-regions_list = df['regions'].dropna().unique().tolist()
 selected_regions = st.sidebar.multiselect(
     "เลือกภูมิภาค:", 
-    options=regions_list, 
-    default=regions_list
+    options=valid_regions, 
+    default=valid_regions
 )
 
-# กรองข้อมูลตามที่ผู้ใช้เลือก
+# 🌟 การกรองข้อมูลตามเงื่อนไข (รองรับการดึงข้อมูลกลางแบบ 'estimated' เข้ามาโชว์ด้วยเพื่อให้สอดคล้องกับแถวในตาราง)
 filtered_df = df[
     (df['account_type_desc'].isin(selected_accounts)) & 
-    (df['regions'].isin(selected_regions)) &
-    (df['is_active'] == 1) # เอาเฉพาะรายการที่ยังใช้งานอยู่
+    ((df['regions'].isin(selected_regions)) | (df['regions'].isin(['estimated', 'nan', 'None'])) | (df['regions'].isna())) &
+    (df['is_active'] == 1) # นำเอาเฉพาะพืชที่ยังใช้งานอยู่ตามบัญชีจริง
 ].copy()
 
 # 4. ส่วนหัวของหน้า Dashboard
@@ -94,9 +87,13 @@ st.markdown("---")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
+    # นับจำนวนพืชที่ใช้งานได้ทั้งหมดในระบบ (is_active == 1)
+    total_active_in_db = len(df[df['is_active'] == 1])
     st.metric(
-        label="จำนวนชนิดพืชในระบบทั้งหมด", 
-        value=f"{len(filtered_df):,}/ {len(df)} ชนิด"
+        label="📌 จำนวนพืชที่แสดงในตารางขณะนี้", 
+        value=f"{len(filtered_df):,} ชนิด",
+        delta=f"คิดเป็น {len(filtered_df)/total_active_in_db*100:.1f}% ของพืชทั้งหมดในระบบ" if total_active_in_db > 0 else None,
+        delta_color="normal"
     )
 with col2:
     avg_cost = filtered_df['avg_cost_total'].mean()
@@ -135,7 +132,6 @@ with tab1:
             "avg_proposed_price": "ราคาเสนออ้างอิง (บาท)"
         }
         
-        # ป้องกัน error กรณีไม่มีข้อมูลเหลือจากการกรอง
         if not filtered_df.empty:
             top_10 = filtered_df.dropna(subset=[metric_to_plot]).nlargest(10, metric_to_plot)
             fig_bar = px.bar(
@@ -169,7 +165,6 @@ with tab1:
 with tab2:
     st.markdown("#### กราฟกระจายตัวเปรียบเทียบต้นทุนรวมและรายได้ต่อปีแยกตามพืช")
     if not filtered_df.empty:
-        # เช็คว่ามีค่า WTA ที่เหมาะสมมาทำเป็นขนาดจุดขนาดวงกลมหรือไม่
         has_valid_wta = 'avg_wta' in filtered_df.columns and filtered_df['avg_wta'].fillna(0).min() >= 0 and filtered_df['avg_wta'].sum() > 0
         
         fig_scatter = px.scatter(
@@ -179,7 +174,7 @@ with tab2:
             color="account_type_desc",
             size="avg_wta" if has_valid_wta else None,
             hover_name="plant_name",
-            hover_data=["regions", "avg_age", "avg_proposed_price"] if "avg_age" in filtered_df.columns else ["regions", "avg_proposed_price"],
+            hover_data=["regions", "avg_proposed_price"],
             labels={
                 "avg_cost_total": "ต้นทุนรวมเฉลี่ย (บาท)",
                 "avg_revenue_per_year": "รายได้รวมเฉลี่ยต่อปี (บาท)"
@@ -194,22 +189,23 @@ with tab2:
 st.markdown("---")
 st.markdown("### 🗃️ ตารางค้นหาข้อมูลและดาวน์โหลด (Data Explorer)")
 
-search_query = st.text_input("🔍 พิมพ์ชื่อพืชที่ต้องการค้นหา:")
+search_query = st.text_input("🔍 พิมพ์ชื่อพืชที่ต้องการค้นหา (แบบ Real-time):")
 if search_query:
     display_df = filtered_df[filtered_df['plant_name'].str.contains(search_query, na=False)]
 else:
     display_df = filtered_df
 
-# คัดเลือกคอลัมน์ที่ปลอดภัยมาแสดงผล (ตรวจสอบคอลัมน์ที่มีอยู่จริง)
+# คัดเลือกคอลัมน์หลักมาแสดงผลในหน้าเว็บ
 available_cols = ['plant_id', 'plant_name', 'account_type_desc', 'regions', 'avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price']
 cols_to_show = [c for c in available_cols if c in display_df.columns]
 
+# แสดงตารางข้อมูลดิบ
 st.dataframe(display_df[cols_to_show], use_container_width=True)
 
-# ปุ่มกดสำหรับดาวน์โหลดข้อมูลที่ฟิลเตอร์แล้วออกไปเป็น CSV
+# ปุ่มดาวน์โหลดข้อมูล
 csv = display_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button(
-    label="📥 ดาวน์โหลดข้อมูลชุดนี้เป็นไฟล์ CSV",
+    label=f"📥 ดาวน์โหลดข้อมูลที่เลือกทั้งหมด ({len(display_df)} รายการ) เป็นไฟล์ CSV",
     data=csv,
     file_name='filtered_erc_data_2568.csv',
     mime='text/csv',
