@@ -65,36 +65,9 @@ filtered_df = df[
 
 # 4. ส่วนหัวของหน้า Dashboard
 st.title("🌱 แดชบอร์ดวิเคราะห์ต้นทุนและผลตอบแทนพืช (ERC 2568)")
-st.markdown("วิเคราะห์ข้อมูลบัญชีราคากลางต้นทุน ผลตอบแทน และราคาเสนอชดเชยตามเกณฑ์ กกพ.")
-st.markdown("---")
+st.markdown("### 📊 การวิเคราะห์เชิงเปรียบเทียบ")
 
-# 5. ส่วนแสดงตัวเลขสำคัญ (Key Metrics) - [ปรับปรุงใหม่ให้ไม่มี Delta]
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    # 🌟 ถอดส่วนของคำสั่ง delta ออก เหลือเพียงตัวเลขชนิดพืชเดี่ยวๆ คลีนๆ
-    st.metric(
-        label="📌 จำนวนพืชที่แสดงในตารางขณะนี้", 
-        value=f"{len(filtered_df):,} ชนิด"
-    )
-with col2:
-    avg_cost = filtered_df['avg_cost_total'].mean()
-    st.metric(
-        label="ต้นทุนรวมเฉลี่ย", 
-        value=f"{avg_cost:,.2f} บาท" if not pd.isna(avg_cost) else "N/A"
-    )
-with col3:
-    avg_rev = filtered_df['avg_revenue_per_year'].mean()
-    st.metric(
-        label="รายได้เฉลี่ย/ปี", 
-        value=f"{avg_rev:,.2f} บาท" if not pd.isna(avg_rev) else "N/A"
-    )
-with col4:
-    avg_wta = filtered_df['avg_wta'].mean()
-    st.metric(
-        label="ค่าความเต็มใจที่จะรับ (WTA) เฉลี่ย", 
-        value=f"{avg_wta:,.2f} บาท" if not pd.isna(avg_wta) else "N/A"
-    )
+# 5. ส่วนแสดงกราฟ
 
 st.markdown("### 📊 การวิเคราะห์เชิงเปรียบเทียบ")
 
