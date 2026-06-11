@@ -55,10 +55,6 @@ def load_data():
             "B": "บัญชี ข. (พืชล้มลุกและพืชเกษตร)"
         })
 
-    df["account_type_desc"] = df["account_type_desc"].fillna(
-        "ไม่ระบุประเภทบัญชี"
-    )
-
     if (
         "profit_est" not in df.columns
         or df["profit_est"].isnull().all()
