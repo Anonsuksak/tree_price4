@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import os
 
 # 1. ตั้งค่าหน้าตารูปแบบเว็บ Dashboard
@@ -20,41 +19,40 @@ def load_data():
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"ไม่พบไฟล์ข้อมูล: {file_path}")
 
-    # อ่านไฟล์ตามปกติ
-    df = pd.read_csv(file_path)
+    # โหลดไฟล์แบบกำหนดค่ารหัสข้อความให้ปลอดภัย
+    df = pd.read_csv(file_path, encoding='utf-8')
     
-    # 🌟 [แก้ไขจุดสำคัญ] ตรวจสอบว่าคอลัมน์ไหนเป็นภูมิภาคของจริง
-    # บังคับคลีนข้อมูลภูมิภาคให้ถูกต้อง ป้องกันกรณีดึงเลขสถิติมาเป็นชื่อภาค
+    # ล้างข้อมูลภูมิภาคให้สะอาดและจัดกลุ่มให้อยู่ในกลุ่มที่อ่านง่าย
     if 'regions' in df.columns:
         df['regions'] = df['regions'].astype(str).str.strip()
-        # ถ้าเจอค่าที่เป็นตัวเลขหลุดมา ให้ตีเป็น 'ทั่วประเทศ (ค่าประเมิน)' ทั้งหมด
-        df['regions'] = df['regions'].replace({
-            'estimated': 'ทั่วประเทศ (ค่าประเมิน)',
-            'nan': 'ทั่วประเทศ (ค่าประเมิน)',
-            'None': 'ทั่วประเทศ (ค่าประเมิน)',
-            '0': 'ทั่วประเทศ (ค่าประเมิน)',
-            '1': 'ทั่วประเทศ (ค่าประเมิน)',
-            '2': 'ทั่วประเทศ (ค่าประเมิน)'
-        })
-        df['regions'] = df['regions'].fillna('ทั่วประเทศ (ค่าประเมิน)')
+        # แปลงรหัสย่อให้เป็นคำอ่านเพื่อใช้แสดงผลบนหน้าจอ
+        region_map = {
+            'N': 'ภาคเหนือ (N)',
+            'NE': 'ภาคตะวันออกเฉียงเหนือ (NE)',
+            'CN': 'ภาคกลาง/เหนือตอนล่าง (CN)',
+            'S': 'ภาคใต้ (S)',
+            'estimated': 'ทั่วประเทศ (ค่าประเมินกลาง)',
+            'nan': 'ทั่วประเทศ (ค่าประเมินกลาง)'
+        }
+        df['regions_display'] = df['regions'].map(region_map).fillna('ทั่วประเทศ (ค่าประเมินกลาง)')
     else:
-        df['regions'] = 'ทั่วประเทศ (ค่าประเมิน)'
+        df['regions_display'] = 'ทั่วประเทศ (ค่าประเมินกลาง)'
 
-    # แปลงคอลัมน์ตัวเลขให้ถูกต้อง ป้องกัน String format
+    # แปลงคอลัมน์ตัวเลขให้ถูกต้อง ป้องกันปัญหา String format คั่นคอมมา
     numeric_cols = ['avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price', 'profit_est']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace(',', '').str.strip()
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
-    # แปลงรูปแบบประเภทบัญชี
+    # แปลงประเภทบัญชี
     if 'account_type' in df.columns:
         df['account_type_desc'] = df['account_type'].map({'A': 'บัญชี ก. (ต้นไม้ทั่วไป)', 'B': 'บัญชี ข. (ต้นไม้ล้มลุก)'})
     else:
         df['account_type_desc'] = 'ไม่ระบุประเภทบัญชี'
     df['account_type_desc'] = df['account_type_desc'].fillna('ไม่ระบุประเภทบัญชี')
 
-    # คำนวณกำไรประเมิน
+    # คำนวณกำไรประเมินสุทธิ
     if 'profit_est' not in df.columns or df['profit_est'].isnull().all():
         df['profit_est'] = df['avg_revenue_per_year'].fillna(0) - df['avg_cost_total'].fillna(0)
         
@@ -69,7 +67,6 @@ except Exception as e:
 # 3. ส่วนควบคุมด้านข้าง (Sidebar Filters)
 st.sidebar.header("🔍 ตัวกรองข้อมูล (Filters)")
 
-# เลือกประเภทบัญชี
 account_types = df['account_type_desc'].unique().tolist()
 selected_accounts = st.sidebar.multiselect(
     "เลือกประเภทบัญชีพืช:", 
@@ -77,21 +74,20 @@ selected_accounts = st.sidebar.multiselect(
     default=account_types
 )
 
-# เลือกภูมิภาค (เอาเฉพาะค่าที่เราคลีนแล้วชัวร์ๆ ไปให้เลือก)
-regions_list = df['regions'].unique().tolist()
+regions_list = df['regions_display'].unique().tolist()
 selected_regions = st.sidebar.multiselect(
     "เลือกภูมิภาค:", 
     options=regions_list, 
     default=regions_list
 )
 
-# 🌟 ปรับปรุงการกรองแบบ Strict (ตรงไปตรงมา ไม่ใช้สัญลักษณ์ OR ซับซ้อนที่ทำให้แถวเบิ้ล)
+# 🌟 การกรองข้อมูลแบบตรงไปตรงมา 1 แถวคือ 1 ชนิดพืช ไม่มีการแตกตัวคูณซ้ำซ้อน
 filtered_df = df[
     (df['account_type_desc'].isin(selected_accounts)) & 
-    (df['regions'].isin(selected_regions))
+    (df['regions_display'].isin(selected_regions))
 ].copy()
 
-# กรองเฉพาะรายการที่ active ถ้ามีคอลัมน์นี้อยู่จริง
+# กรองเฉพาะรายการที่ active (ถ้าในไฟล์มีระบุไว้)
 if 'is_active' in filtered_df.columns:
     filtered_df = filtered_df[filtered_df['is_active'] == 1]
 
@@ -104,10 +100,11 @@ st.markdown("---")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
+    # แสดงจำนวนพืชตามจริงที่นับจากจำนวนแถวหลังหักตัวกรองแล้ว
     st.metric(
         label="📌 จำนวนพืชที่แสดงในตารางขณะนี้", 
         value=f"{len(filtered_df):,} ชนิด",
-        delta=f"จากพืชทั้งหมดในไฟล์ {len(df)} แถวข้อมูล"
+        delta=f"จากข้อมูลในไฟล์ทั้งหมด {len(df)} แถว"
     )
 with col2:
     avg_cost = filtered_df['avg_cost_total'].mean()
@@ -205,7 +202,7 @@ if search_query and 'plant_name' in filtered_df.columns:
 else:
     display_df = filtered_df
 
-available_cols = ['plant_id', 'plant_name', 'account_type_desc', 'regions', 'avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price']
+available_cols = ['plant_id', 'plant_name', 'account_type_desc', 'regions_display', 'avg_cost_total', 'avg_revenue_per_year', 'avg_wta', 'avg_proposed_price']
 cols_to_show = [c for c in available_cols if c in display_df.columns]
 
 st.dataframe(display_df[cols_to_show], use_container_width=True)
