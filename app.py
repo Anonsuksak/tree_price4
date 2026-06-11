@@ -15,7 +15,6 @@ st.set_page_config(
 # 2. ฟังก์ชันโหลดและล้างข้อมูล (Data Cleaning & Conversion)
 @st.cache_data
 def load_data():
-    # ล็อคชื่อไฟล์จริงที่คุณใช้ทำงาน
     file_path = "ฐานข้อมูลต้นทุนและผลตอบแทน_ERC_2568.csv"
     
     if not os.path.exists(file_path):
@@ -33,11 +32,10 @@ def load_data():
     # แปลงข้อมูลคำอธิบายบัญชีให้อ่านง่ายขึ้น
     df['account_type_desc'] = df['account_type'].map({'A': 'บัญชี ก. (ต้นไม้ทั่วไป)', 'B': 'บัญชี ข. (ต้นไม้ล้มลุก)'})
     
-    # ทำความสะอาดข้อมูลภูมิภาค (ลบช่องว่างออก)
-    if 'regions' in df.columns:
-        df['regions'] = df['regions'].astype(str).str.strip()
-    else:
-        df['regions'] = 'estimated'
+    # เคลียร์ค่าว่างและคำว่า estimated ในคอลัมน์ภูมิภาคให้เป็นมาตรฐานเดียวกัน
+    df['regions'] = df['regions'].astype(str).str.strip()
+    df['regions'] = df['regions'].replace({'estimated': 'ทั่วประเทศ (ค่าประเมิน)', 'nan': 'ทั่วประเทศ (ค่าประเมิน)', 'None': 'ทั่วประเทศ (ค่าประเมิน)'})
+    df['regions'] = df['regions'].fillna('ทั่วประเทศ (ค่าประเมิน)')
     
     # สร้างคอลัมน์กำไรสุทธิประเมิน (Profit) หากในไฟล์ไม่มี
     if 'profit_est' not in df.columns or df['profit_est'].isnull().all():
@@ -55,9 +53,6 @@ except Exception as e:
 # 3. ส่วนควบคุมด้านข้าง (Sidebar Filters)
 st.sidebar.header("🔍 ตัวกรองข้อมูล (Filters)")
 
-# กรองลิสต์เฉพาะภูมิภาคที่มีค่าจริง ไม่นับรวมค่าว่างหรือ estimated มาแสดงในเมนูตัวเลือก
-valid_regions = df[~df['regions'].isin(['nan', 'estimated', 'None']) & df['regions'].notna()]['regions'].unique().tolist()
-
 account_types = df['account_type_desc'].dropna().unique().tolist()
 selected_accounts = st.sidebar.multiselect(
     "เลือกประเภทบัญชีพืช:", 
@@ -65,17 +60,19 @@ selected_accounts = st.sidebar.multiselect(
     default=account_types
 )
 
+# ดึงรายชื่อภูมิภาคทั้งหมด (รวมตัว 'ทั่วประเทศ' เข้าไปด้วย เพื่อให้เลือกติ๊กได้)
+regions_list = df['regions'].unique().tolist()
 selected_regions = st.sidebar.multiselect(
     "เลือกภูมิภาค:", 
-    options=valid_regions, 
-    default=valid_regions
+    options=regions_list, 
+    default=regions_list
 )
 
-# 🌟 การกรองข้อมูลตามเงื่อนไข (รองรับการดึงข้อมูลกลางแบบ 'estimated' เข้ามาโชว์ด้วยเพื่อให้สอดคล้องกับแถวในตาราง)
+# 🌟 ปรับเงื่อนไขการกรองใหม่แบบสะอาดตรงไปตรงมา (หมดปัญหาตัวเลขเบิ้ลซ้ำ)
 filtered_df = df[
     (df['account_type_desc'].isin(selected_accounts)) & 
-    ((df['regions'].isin(selected_regions)) | (df['regions'].isin(['estimated', 'nan', 'None'])) | (df['regions'].isna())) &
-    (df['is_active'] == 1) # นำเอาเฉพาะพืชที่ยังใช้งานอยู่ตามบัญชีจริง
+    (df['regions'].isin(selected_regions)) &
+    (df['is_active'] == 1) # นำเอาเฉพาะพืชที่ยังใช้งานอยู่
 ].copy()
 
 # 4. ส่วนหัวของหน้า Dashboard
@@ -87,13 +84,12 @@ st.markdown("---")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    # นับจำนวนพืชที่ใช้งานได้ทั้งหมดในระบบ (is_active == 1)
+    # นับพืชที่ยังใช้งานอยู่ทั้งหมดในไฟล์ (is_active == 1)
     total_active_in_db = len(df[df['is_active'] == 1])
     st.metric(
         label="📌 จำนวนพืชที่แสดงในตารางขณะนี้", 
         value=f"{len(filtered_df):,} ชนิด",
-        delta=f"คิดเป็น {len(filtered_df)/total_active_in_db*100:.1f}% ของพืชทั้งหมดในระบบ" if total_active_in_db > 0 else None,
-        delta_color="normal"
+        delta=f"จากพืชที่ใช้งานได้ทั้งหมด {total_active_in_db} ชนิด"
     )
 with col2:
     avg_cost = filtered_df['avg_cost_total'].mean()
