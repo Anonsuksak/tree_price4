@@ -50,18 +50,50 @@ except Exception as e:
 # 3. ส่วนควบคุมด้านข้าง (Sidebar Filters)
 st.sidebar.header("🔍 ตัวกรองข้อมูล (Filters)")
 
+# ประเภทบัญชี
 account_types = df['account_type_desc'].unique().tolist()
 selected_accounts = st.sidebar.multiselect(
-    "เลือกประเภทบัญชีพืช:", 
-    options=account_types, 
+    "เลือกประเภทบัญชีพืช:",
+    options=account_types,
     default=account_types
 )
 
-# การกรองข้อมูล 1 แถวคือ 1 ชนิดพืช
+# ภูมิภาค
+region_options = ["CN", "N", "NE", "S"]
+
+selected_regions = st.sidebar.multiselect(
+    "เลือกภูมิภาค:",
+    options=region_options,
+    default=region_options
+)
+
+# กรองข้อมูลเบื้องต้น
 filtered_df = df[
     (df['account_type_desc'].isin(selected_accounts)) &
-    (df['is_active'] == 1) # กรองเฉพาะพืชที่ยังใช้งานอยู่จริง
+    (df['is_active'] == 1)
 ].copy()
+
+# กรองตามภูมิภาค
+if selected_regions:
+    filtered_df = filtered_df[
+        filtered_df['regions'].fillna('').apply(
+            lambda x: any(
+                region in str(x).split(',')
+                for region in selected_regions
+            )
+        )
+    ]
+
+# แหล่งที่มาของข้อมูล
+show_estimated = st.sidebar.checkbox(
+    "รวมข้อมูลประมาณการ (estimated)",
+    value=True
+)
+
+if not show_estimated:
+    filtered_df = filtered_df[
+        filtered_df['regions'] != 'estimated'
+    ]
 
 # 4. ส่วนหัวของหน้า Dashboard
 st.title("🌱 แดชบอร์ดวิเคราะห์ต้นทุนและผลตอบแทนพืช (ERC 2568)")
